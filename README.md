@@ -27,3 +27,33 @@ GlobalTalk-TranslatorBot is an advanced Telegram bot specialized in translating 
 ## Installation and Setup 🛠️
 
 1. Clone the repository:
+   
+git clone https://github.com/YourUsername/GlobalTalk-TranslatorBot.git
+
+2. Install the required packages:
+
+   pip install -r requirements.txt
+   
+3. Create a `.env` file with your configurations:
+
+   TELEGRAM_BOT_TOKEN=Your_Bot_Token
+GEMINI_API_KEY=Your_Gemini_API_Key
+ADMIN_USER_IDS=ID1,ID2,ID3
+
+4. Start the bot:
+
+   python translator_bot.py
+
+## License 📄
+
+This project is licensed under the MIT License - see the `LICENSE` file for details.
+
+## Contact 📬
+
+https://t.me/@CRZX1337
+
+Project Link: [https://github.com/CRZX1337/GlobalTalk-TranslatorBot](https://github.com/CRZX1337/GlobalTalk-TranslatorBot)
+
+---
+
+Created with ❤️ by [CryZuX]
