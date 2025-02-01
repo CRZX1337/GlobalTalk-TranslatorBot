@@ -50,7 +50,7 @@ This project is licensed under the MIT License - see the `LICENSE` file for deta
 
 ## Contact 📬
 
-https://t.me/@CRZX1337
+https://t.me/CRZX1337
 
 Project Link: [https://github.com/CRZX1337/GlobalTalk-TranslatorBot](https://github.com/CRZX1337/GlobalTalk-TranslatorBot)
 
