@@ -28,7 +28,7 @@ GlobalTalk-TranslatorBot is an advanced Telegram bot specialized in translating 
 
 1. Clone the repository:
    
-git clone https://github.com/YourUsername/GlobalTalk-TranslatorBot.git
+git clone https://github.com/CRZX1337/GlobalTalk-TranslatorBot.git
 
 2. Install the required packages:
 
