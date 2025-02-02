@@ -13,9 +13,12 @@ jobs:
     steps:
       - name: Send Telegram message on Commit
         if: github.event_name == 'push'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          curl -s -X POST "https://api.telegram.org/bot8052323627:AAEzxiAVGTSEHof0LeVV_n70VltqOc01xwY/sendMessage" \
-          -d chat_id="-1002394824391" \
+          curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+          -d chat_id="$TELEGRAM_CHAT_ID" \
           -d parse_mode="Markdown" \
           -d text="
           🚀 *Neuer Commit im Repository*  
@@ -28,9 +31,12 @@ jobs:
 
       - name: Send Telegram message on Release
         if: github.event_name == 'release'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          curl -s -X POST "https://api.telegram.org/bot8052323627:AAEzxiAVGTSEHof0LeVV_n70VltqOc01xwY/sendMessage" \
-          -d chat_id="-1002394824391" \
+          curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+          -d chat_id="$TELEGRAM_CHAT_ID" \
           -d parse_mode="Markdown" \
           -d text="
           🎉 *Neues Release veröffentlicht!*  
@@ -38,5 +44,7 @@ jobs:
           🏷 *Version:* \`${{ github.event.release.tag_name }}\`  
           📝 *Changelog:*  
           \`\`\`${{ github.event.release.body }}\`\`\`  
-          📅 *Datum:* $(date '+%Y-%m-%d %H:%M:%S') UTC  
+          📅 *Datum:* $(date '+%Y-%m-
+
+%d %H:%M:%S') UTC  
           🔗 [📦 Release ansehen](${{ github.event.release.html_url }})"
