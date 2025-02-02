@@ -1,7 +1,7 @@
 import os
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext, CallbackQueryHandler, ConversationHandler
@@ -35,75 +35,41 @@ VALID_LANGUAGE_CODES = {
     'sv': 'Swedish', 'tr': 'Turkish', 'vi': 'Vietnamese', 'th': 'Thai'
 }
 
-# Benutzereinstellungen laden oder erstellen
-def load_user_settings():
-    if os.path.exists(USER_SETTINGS_FILE):
-        with open(USER_SETTINGS_FILE, 'r') as f:
+# Hilfsfunktionen für Dateioperationen
+def load_json(filename, default={}):
+    if os.path.exists(filename):
+        with open(filename, 'r') as f:
             return json.load(f)
-    return {}
+    return default
 
-def save_user_settings(settings):
-    with open(USER_SETTINGS_FILE, 'w') as f:
-        json.dump(settings, f)
+def save_json(filename, data):
+    with open(filename, 'w') as f:
+        json.dump(data, f)
 
-user_settings = load_user_settings()
-
-# Nutzungsstatistiken laden oder erstellen
-def load_usage_stats():
-    if os.path.exists(USAGE_STATS_FILE):
-        with open(USAGE_STATS_FILE, 'r') as f:
-            return json.load(f)
-    return {"total_translations": 0, "daily_stats": {}}
-
-def save_usage_stats(stats):
-    with open(USAGE_STATS_FILE, 'w') as f:
-        json.dump(stats, f)
-
-usage_stats = load_usage_stats()
-
-# Benutzerinformationen laden oder erstellen
-def load_user_info():
-    if os.path.exists(USER_INFO_FILE):
-        with open(USER_INFO_FILE, 'r') as f:
-            return json.load(f)
-    return {}
-
-def save_user_info(info):
-    with open(USER_INFO_FILE, 'w') as f:
-        json.dump(info, f)
-
-user_info = load_user_info()
-
-# VIP-Benutzer laden oder erstellen
-def load_vip_users():
-    if os.path.exists(VIP_USERS_FILE):
-        with open(VIP_USERS_FILE, 'r') as f:
-            return json.load(f)
-    return {}
-
-def save_vip_users(vip_users):
-    with open(VIP_USERS_FILE, 'w') as f:
-        json.dump(vip_users, f)
-
-vip_users = load_vip_users()
+# Lade Daten
+user_settings = load_json(USER_SETTINGS_FILE)
+usage_stats = load_json(USAGE_STATS_FILE, {"total_translations": 0, "daily_stats": {}})
+user_info = load_json(USER_INFO_FILE)
+vip_users = set(load_json(VIP_USERS_FILE, []))
 
 def ensure_user_in_settings(user_id):
-    if str(user_id) not in user_settings:
-        user_settings[str(user_id)] = 'en'  # Standardsprache auf Englisch setzen
-        save_user_settings(user_settings)
+    user_id = str(user_id)
+    if user_id not in user_settings:
+        user_settings[user_id] = 'en'
+        save_json(USER_SETTINGS_FILE, user_settings)
 
 def get_user_language(user_id):
     return user_settings.get(str(user_id), 'en')
 
 def set_user_language(user_id, language):
     user_settings[str(user_id)] = language
-    save_user_settings(user_settings)
+    save_json(USER_SETTINGS_FILE, user_settings)
 
 def update_usage_stats():
     today = datetime.now().strftime("%Y-%m-%d")
     usage_stats["total_translations"] += 1
     usage_stats["daily_stats"][today] = usage_stats["daily_stats"].get(today, 0) + 1
-    save_usage_stats(usage_stats)
+    save_json(USAGE_STATS_FILE, usage_stats)
 
 def update_user_info(user):
     user_id = str(user.id)
@@ -114,18 +80,10 @@ def update_user_info(user):
         "language_code": user.language_code,
         "last_activity": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
-    save_user_info(user_info)
+    save_json(USER_INFO_FILE, user_info)
 
 def is_vip(user_id):
-    user_id = str(user_id)
-    if user_id in vip_users:
-        expiry_date = datetime.fromtimestamp(float(vip_users[user_id]))
-        if expiry_date > datetime.now():
-            return True
-        else:
-            del vip_users[user_id]
-            save_vip_users(vip_users)
-    return False
+    return str(user_id) in vip_users
 
 def translate_text(text, target_language, source_language=None):
     if not source_language:
@@ -303,7 +261,7 @@ def button_callback(update: Update, context: CallbackContext) -> None:
         query.edit_message_text(text)
     elif query.data == 'reset_settings':
         user_settings.clear()
-        save_user_settings(user_settings)
+        save_json(USER_SETTINGS_FILE, user_settings)
         query.edit_message_text("🔄 All user settings have been reset.")
     elif query.data == 'usage_stats':
         total = usage_stats["total_translations"]
@@ -322,7 +280,7 @@ def button_callback(update: Update, context: CallbackContext) -> None:
         query.edit_message_text("👤 Please enter the user ID to get detailed information:")
         context.user_data['admin_state'] = 'waiting_for_user_info'
     elif query.data == 'add_vip_user':
-        query.edit_message_text("🌟 Please enter the user ID and duration (in days) to add as a VIP user (e.g., '123456789 30'):")
+        query.edit_message_text("🌟 Please enter the user ID to add as a VIP user:")
         context.user_data['admin_state'] = 'waiting_for_vip_user_id'
     elif query.data == 'remove_vip_user':
         query.edit_message_text("🔽 Please enter the user ID to remove from VIP users:")
@@ -331,9 +289,6 @@ def button_callback(update: Update, context: CallbackContext) -> None:
         users_list = "📋 List of all users:\n\n"
         for user_id, language in user_settings.items():
             vip_status = "🌟 VIP" if user_id in vip_users else "Regular"
-            if vip_status == "🌟 VIP":
-                expiry_date = datetime.fromtimestamp(float(vip_users[user_id])).strftime("%Y-%m-%d")
-                vip_status += f" (Expires: {expiry_date})"
             users_list += f"User ID: {user_id}, Language: {language}, Status: {vip_status}\n"
         query.edit_message_text(users_list[:4096])  # Telegram message limit is 4096 characters
 
@@ -381,26 +336,16 @@ def handle_admin_input(update: Update, context: CallbackContext) -> None:
             update.message.reply_text(f"Error retrieving user information: {str(e)}")
         del context.user_data['admin_state']
     elif state == 'waiting_for_vip_user_id':
-        try:
-            input_text = update.message.text.strip()
-            vip_user_id, duration = input_text.split(maxsplit=1)
-            vip_user_id = str(int(vip_user_id))  # Ensure it's a valid integer and convert to string
-            duration = int(duration)
-            expiry_date = datetime.now() + timedelta(days=duration)
-            vip_users[vip_user_id] = expiry_date.timestamp()
-            save_vip_users(vip_users)
-            update.message.reply_text(f"User {vip_user_id} has been added to VIP users for {duration} days.")
-        except ValueError as e:
-            update.message.reply_text(f"Invalid input. Please use the format: 'user_id duration_in_days'. Error: {str(e)}")
-        except Exception as e:
-            update.message.reply_text(f"An error occurred: {str(e)}")
-        finally:
-            del context.user_data['admin_state']
+        vip_user_id = str(update.message.text)
+        vip_users.add(vip_user_id)
+        save_json(VIP_USERS_FILE, list(vip_users))
+        update.message.reply_text(f"User {vip_user_id} has been added to VIP users.")
+        del context.user_data['admin_state']
     elif state == 'waiting_for_remove_vip_user_id':
         vip_user_id = str(update.message.text)
         if vip_user_id in vip_users:
-            del vip_users[vip_user_id]
-            save_vip_users(vip_users)
+            vip_users.remove(vip_user_id)
+            save_json(VIP_USERS_FILE, list(vip_users))
             update.message.reply_text(f"User {vip_user_id} has been removed from VIP users.")
         else:
             update.message.reply_text(f"User {vip_user_id} is not a VIP user.")
