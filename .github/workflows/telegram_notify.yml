@@ -1,0 +1,28 @@
+name: Notify Telegram on Commit & Release
+
+on:
+  push:
+    branches:
+      - main
+  release:
+    types: [published]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Telegram message on Commit
+        if: github.event_name == 'push'
+        run: |
+          curl -s -X POST https://api.telegram.org/bot7457097413:AAF0eKMO6rJUmp7OIbVxqd2Mt0Em84TqsG4/sendMessage \
+          -d chat_id=-1002394824391 \
+          -d text="🚀 *Neuer Commit in* [${{ github.repository }}](https://github.com/${{ github.repository }})%0A👤 *Autor:* ${{ github.actor }}%0A📜 *Nachricht:* `${{ github.event.head_commit.message }}`%0A🔗 [Commit ansehen](https://github.com/${{ github.repository }}/commit/${{ github.sha }})" \
+          -d parse_mode=Markdown
+
+      - name: Send Telegram message on Release
+        if: github.event_name == 'release'
+        run: |
+          curl -s -X POST https://api.telegram.org/bot7457097413:AAF0eKMO6rJUmp7OIbVxqd2Mt0Em84TqsG4/sendMessage \
+          -d chat_id=-1002394824391 \
+          -d text="🎉 *Neues Release veröffentlicht!*%0A📦 *Repository:* [${{ github.repository }}](https://github.com/${{ github.repository }})%0A🏷 *Tag:* `${{ github.event.release.tag_name }}`%0A📝 *Beschreibung:* `${{ github.event.release.body }}`%0A🔗 [Release ansehen](${{ github.event.release.html_url }})" \
+          -d parse_mode=Markdown
