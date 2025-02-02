@@ -44,7 +44,5 @@ jobs:
           🏷 *Version:* \`${{ github.event.release.tag_name }}\`  
           📝 *Changelog:*  
           \`\`\`${{ github.event.release.body }}\`\`\`  
-          📅 *Datum:* $(date '+%Y-%m-
-
-%d %H:%M:%S') UTC  
+          📅 *Datum:* $(date '+%Y-%m-%d %H:%M:%S') UTC  
           🔗 [📦 Release ansehen](${{ github.event.release.html_url }})"
