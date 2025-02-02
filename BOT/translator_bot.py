@@ -3,9 +3,12 @@ import json
 import logging
 from datetime import datetime
 from dotenv import load_dotenv
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext, CallbackQueryHandler, ConversationHandler
 import google.generativeai as genai
+from gtts import gTTS
+import speech_recognition as sr
+from pydub import AudioSegment
 
 # Lade Umgebungsvariablen aus .env-Datei
 load_dotenv()
@@ -172,6 +175,65 @@ def translate_text(text, target_language, source_language=None):
     
     return translated_text
 
+def text_to_speech(text, lang):
+    try:
+        
+        prompt_improve = f"""
+        Task: Improve the text for text to speech.
+
+        Instructions:
+        1. Analyze the text thoroughly to understand its full context, tone, and intent.
+        2. Correct any grammar issues to make the text perfect for a text to speech application.
+        3. If the text contains humor, wordplay, or cultural references make sure that these are also present when reading it out loud.
+        4. Remove all Anführungszeichen und sonderzeichen wie ! " # $ % & / ( ) = ? ~ etc. die eine korrekte Text zu Sprache ausgabe behindern.
+    
+        Text:
+        "{text}"
+
+        Improved Text:
+        """
+        response_improve = model.generate_content(prompt_improve)
+        improved_text = response_improve.text.strip()
+        
+        #Ersetzen von unerwünschten Sonderzeichen
+        
+        characters_to_remove = ['"', "'", '!', '#', '$', '%', '&', '/', '(', ')', '=', '?', '~', '<', '>', ',', '.']
+        for char in characters_to_remove:
+            improved_text = improved_text.replace(char, '')
+            
+        tts = gTTS(text=improved_text, lang=lang)
+        temp_file = "temp.mp3"
+        tts.save(temp_file)
+        return temp_file
+    except Exception as e:
+        logger.error(f"Error generating TTS: {e}")
+        return None
+
+def tts_command(update: Update, context: CallbackContext) -> None:
+    user = update.effective_user
+    if not is_vip(user.id) and user.id not in ADMIN_USER_IDS:
+        update.message.reply_text("🚫 This feature is only available for VIP users and admins.")
+        return
+    
+    if not context.args:
+        update.message.reply_text("⚠️ Please provide text for text-to-speech.")
+        return
+    
+    text = " ".join(context.args)
+    target_language = get_user_language(user.id)
+    translated_text = translate_text(text, target_language)
+    audio_file = text_to_speech(translated_text, target_language)
+    if audio_file:
+        try:
+            with open(audio_file, 'rb') as f:
+               update.message.reply_audio(audio=InputFile(f), title="Text to Speech")
+            os.remove(audio_file)
+        except Exception as e:
+            update.message.reply_text(f"An error occurred while sending audio: {e}")
+    else:
+        update.message.reply_text("An error occurred while generating audio.")
+
+
 def start(update: Update, context: CallbackContext) -> None:
     user = update.effective_user
     ensure_user_in_settings(user.id)
@@ -181,10 +243,12 @@ def start(update: Update, context: CallbackContext) -> None:
         "🌟 Welcome to GlobalTalk-TranslatorBot! 🌍✨\n\n"
         "I'm here to help you translate forwarded messages into various languages. "
         "Simply forward me a message, and I'll translate it to your preferred language.\n\n"
-        "To get started, use /setlanguage to choose your language, or just start forwarding messages!\n\n"
-        "Need help? Just type /help for more information.",
+        "To get started, use  to choose your language, or just start forwarding messages!\n\n"
+        "Need help?",
         language
     )
+    welcome_message = welcome_message.replace("use", "use /setlanguage")
+    welcome_message += "\n\nNeed help? Just type /help for more information."
     update.message.reply_text(welcome_message)
 
 def help_command(update: Update, context: CallbackContext) -> None:
@@ -198,6 +262,7 @@ def help_command(update: Update, context: CallbackContext) -> None:
         "ℹ️ /help - Show this help message\n"
         "🌍 /languagecodes - View available language codes\n"
         "👨‍💼 /admin - Access admin panel (only for authorized users)\n"
+         "🎧 /tts [text] - Convert text to speech (VIP only)\n"
         "💬 /chat - Start a chat session (for VIP users and admins)\n\n"
         "To translate, simply forward a message to me. Enjoy translating! 🎉",
         language
@@ -219,6 +284,9 @@ def translate_forwarded(update: Update, context: CallbackContext) -> None:
     user = update.effective_user
     ensure_user_in_settings(user.id)
     message = update.message
+    if message.voice:
+        return # If voice message, do not translate
+        
     text = message.text or message.caption or ""
     target_language = get_user_language(user.id)
     source_language = message.from_user.language_code if message.from_user else None
@@ -337,7 +405,6 @@ def button_callback(update: Update, context: CallbackContext) -> None:
     elif query.data == 'list_user_translations':
         query.edit_message_text("👤 Please enter the user ID to get the translation history:")
         context.user_data['admin_state'] = 'waiting_for_user_translations'
-
 
 def handle_admin_input(update: Update, context: CallbackContext) -> None:
     user_id = update.effective_user.id
@@ -471,6 +538,8 @@ def main() -> None:
     dp.add_handler(CommandHandler("setlanguage", set_language))
     dp.add_handler(CommandHandler("admin", admin_panel))
     dp.add_handler(MessageHandler(Filters.forwarded, translate_forwarded))
+    
+    dp.add_handler(CommandHandler("tts", tts_command))
     dp.add_handler(CallbackQueryHandler(button_callback))
 
     chat_handler = ConversationHandler(
