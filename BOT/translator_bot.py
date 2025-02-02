@@ -1,10 +1,10 @@
 import os
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatMember
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext, CallbackQueryHandler
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext, CallbackQueryHandler, ConversationHandler
 import google.generativeai as genai
 
 # Lade Umgebungsvariablen aus .env-Datei
@@ -17,6 +17,7 @@ ADMIN_USER_IDS = [int(id) for id in os.getenv('ADMIN_USER_IDS').split(',')]
 USER_SETTINGS_FILE = "user_settings.json"
 USAGE_STATS_FILE = "usage_stats.json"
 USER_INFO_FILE = "user_info.json"
+VIP_USERS_FILE = "vip_users.json"
 
 # Logging konfigurieren
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -73,6 +74,19 @@ def save_user_info(info):
 
 user_info = load_user_info()
 
+# VIP-Benutzer laden oder erstellen
+def load_vip_users():
+    if os.path.exists(VIP_USERS_FILE):
+        with open(VIP_USERS_FILE, 'r') as f:
+            return json.load(f)
+    return {}
+
+def save_vip_users(vip_users):
+    with open(VIP_USERS_FILE, 'w') as f:
+        json.dump(vip_users, f)
+
+vip_users = load_vip_users()
+
 def ensure_user_in_settings(user_id):
     if str(user_id) not in user_settings:
         user_settings[str(user_id)] = 'en'  # Standardsprache auf Englisch setzen
@@ -101,6 +115,17 @@ def update_user_info(user):
         "last_activity": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
     save_user_info(user_info)
+
+def is_vip(user_id):
+    user_id = str(user_id)
+    if user_id in vip_users:
+        expiry_date = datetime.fromtimestamp(float(vip_users[user_id]))
+        if expiry_date > datetime.now():
+            return True
+        else:
+            del vip_users[user_id]
+            save_vip_users(vip_users)
+    return False
 
 def translate_text(text, target_language, source_language=None):
     if not source_language:
@@ -186,7 +211,8 @@ def help_command(update: Update, context: CallbackContext) -> None:
         "🔤 /setlanguage [code] - Set your preferred language (e.g., /setlanguage es for Spanish)\n"
         "ℹ️ /help - Show this help message\n"
         "🌍 /languagecodes - View available language codes\n"
-        "👨‍💼 /admin - Access admin panel (only for authorized users)\n\n"
+        "👨‍💼 /admin - Access admin panel (only for authorized users)\n"
+        "💬 /chat - Start a chat session (for VIP users and admins)\n\n"
         "To translate, simply forward a message to me. Enjoy translating! 🎉",
         language
     )
@@ -254,7 +280,10 @@ def admin_panel(update: Update, context: CallbackContext) -> None:
         [InlineKeyboardButton("📈 Usage Statistics", callback_data='usage_stats')],
         [InlineKeyboardButton("🔍 Search User", callback_data='search_user')],
         [InlineKeyboardButton("📣 Broadcast Message", callback_data='broadcast')],
-        [InlineKeyboardButton("👤 User Info", callback_data='user_info')]
+        [InlineKeyboardButton("👤 User Info", callback_data='user_info')],
+        [InlineKeyboardButton("🌟 Add VIP User", callback_data='add_vip_user')],
+        [InlineKeyboardButton("🔽 Remove VIP User", callback_data='remove_vip_user')],
+        [InlineKeyboardButton("📋 List All Users", callback_data='list_users')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     update.message.reply_text("👨‍💼 Admin Panel:", reply_markup=reply_markup)
@@ -292,6 +321,21 @@ def button_callback(update: Update, context: CallbackContext) -> None:
     elif query.data == 'user_info':
         query.edit_message_text("👤 Please enter the user ID to get detailed information:")
         context.user_data['admin_state'] = 'waiting_for_user_info'
+    elif query.data == 'add_vip_user':
+        query.edit_message_text("🌟 Please enter the user ID and duration (in days) to add as a VIP user (e.g., '123456789 30'):")
+        context.user_data['admin_state'] = 'waiting_for_vip_user_id'
+    elif query.data == 'remove_vip_user':
+        query.edit_message_text("🔽 Please enter the user ID to remove from VIP users:")
+        context.user_data['admin_state'] = 'waiting_for_remove_vip_user_id'
+    elif query.data == 'list_users':
+        users_list = "📋 List of all users:\n\n"
+        for user_id, language in user_settings.items():
+            vip_status = "🌟 VIP" if user_id in vip_users else "Regular"
+            if vip_status == "🌟 VIP":
+                expiry_date = datetime.fromtimestamp(float(vip_users[user_id])).strftime("%Y-%m-%d")
+                vip_status += f" (Expires: {expiry_date})"
+            users_list += f"User ID: {user_id}, Language: {language}, Status: {vip_status}\n"
+        query.edit_message_text(users_list[:4096])  # Telegram message limit is 4096 characters
 
 def handle_admin_input(update: Update, context: CallbackContext) -> None:
     user_id = update.effective_user.id
@@ -330,11 +374,59 @@ def handle_admin_input(update: Update, context: CallbackContext) -> None:
             message += f"Last Name: {user.last_name}\n" if user.last_name else "Last Name: Not set\n"
             message += f"Language Code: {user.language_code}\n" if user.language_code else "Language Code: Not set\n"
             message += f"Is Bot: {'Yes' if user.is_bot else 'No'}\n"
-            message += f"Preferred Language: {VALID_LANGUAGE_CODES.get(language, language)}"
+            message += f"Preferred Language: {VALID_LANGUAGE_CODES.get(language, language)}\n"
+            message += f"VIP Status: {'Yes' if str(user_id) in vip_users else 'No'}"
             update.message.reply_text(message)
         except Exception as e:
             update.message.reply_text(f"Error retrieving user information: {str(e)}")
         del context.user_data['admin_state']
+    elif state == 'waiting_for_vip_user_id':
+        try:
+            input_text = update.message.text.strip()
+            vip_user_id, duration = input_text.split(maxsplit=1)
+            vip_user_id = str(int(vip_user_id))  # Ensure it's a valid integer and convert to string
+            duration = int(duration)
+            expiry_date = datetime.now() + timedelta(days=duration)
+            vip_users[vip_user_id] = expiry_date.timestamp()
+            save_vip_users(vip_users)
+            update.message.reply_text(f"User {vip_user_id} has been added to VIP users for {duration} days.")
+        except ValueError as e:
+            update.message.reply_text(f"Invalid input. Please use the format: 'user_id duration_in_days'. Error: {str(e)}")
+        except Exception as e:
+            update.message.reply_text(f"An error occurred: {str(e)}")
+        finally:
+            del context.user_data['admin_state']
+    elif state == 'waiting_for_remove_vip_user_id':
+        vip_user_id = str(update.message.text)
+        if vip_user_id in vip_users:
+            del vip_users[vip_user_id]
+            save_vip_users(vip_users)
+            update.message.reply_text(f"User {vip_user_id} has been removed from VIP users.")
+        else:
+            update.message.reply_text(f"User {vip_user_id} is not a VIP user.")
+        del context.user_data['admin_state']
+
+def chat(update: Update, context: CallbackContext) -> None:
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_USER_IDS and not is_vip(user_id):
+        update.message.reply_text("🚫 This feature is only available for VIP users and admins.")
+        return ConversationHandler.END
+    
+    update.message.reply_text("You can now start chatting with the AI. Send /endchat to end the conversation.")
+    return 'chatting'
+
+def handle_chat_message(update: Update, context: CallbackContext) -> None:
+    user_message = update.message.text
+    if user_message.lower() == '/endchat':
+        update.message.reply_text("Chat session ended. Thank you for using our service!")
+        return ConversationHandler.END
+    
+    try:
+        response = model.generate_content(user_message)
+        update.message.reply_text(response.text)
+    except Exception as e:
+        update.message.reply_text(f"An error occurred: {str(e)}")
+    return 'chatting'
 
 def main() -> None:
     updater = Updater(TELEGRAM_BOT_TOKEN)
@@ -347,6 +439,17 @@ def main() -> None:
     dp.add_handler(CommandHandler("admin", admin_panel))
     dp.add_handler(MessageHandler(Filters.forwarded, translate_forwarded))
     dp.add_handler(CallbackQueryHandler(button_callback))
+
+    chat_handler = ConversationHandler(
+        entry_points=[CommandHandler('chat', chat)],
+        states={
+            'chatting': [MessageHandler(Filters.text & ~Filters.command, handle_chat_message)]
+        },
+        fallbacks=[CommandHandler('endchat', lambda u, c: ConversationHandler.END)]
+    )
+    dp.add_handler(chat_handler)
+
+    # Dieser Handler muss nach dem ConversationHandler hinzugefügt werden
     dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_admin_input))
 
     updater.start_polling()
