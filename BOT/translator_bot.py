@@ -4,7 +4,16 @@ import logging
 from datetime import datetime
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext, CallbackQueryHandler, ConversationHandler
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    ConversationHandler,
+    filters,
+    ContextTypes,
+    ApplicationHandlerStop
+)
 import google.generativeai as genai
 from gtts import gTTS
 import speech_recognition as sr
@@ -28,7 +37,15 @@ logger = logging.getLogger(__name__)
 
 # Gemini API konfigurieren
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-pro')
+
+# --- Model Selection ---
+# Use the best available model.  'gemini-pro' is generally a good choice for text.
+# If you have access to 'gemini-1.5-pro-001' or later, use that.  Otherwise, stick with 'gemini-pro'.
+# MODEL_NAME = 'gemini-1.5-pro-001'  # Uncomment if you have access
+MODEL_NAME = 'gemini-pro'  # Comment out if using gemini-1.5-pro-001
+
+model = genai.GenerativeModel(MODEL_NAME)
+# --- End Model Selection ---
 
 # Gültige Sprachcodes
 VALID_LANGUAGE_CODES = {
@@ -93,7 +110,7 @@ def update_user_info(user):
        user_info[user_id]["last_activity"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
        if "translation_count" not in user_info[user_id]:
             user_info[user_id]["translation_count"] = 0
-    
+
     user_info[user_id]["translation_count"] += 1
     save_json(USER_INFO_FILE, user_info)
 
@@ -116,7 +133,7 @@ def translate_text(text, target_language, source_language=None):
         """
         response_detect = model.generate_content(prompt_detect)
         source_language = response_detect.text.strip()
-    
+
     if source_language not in VALID_LANGUAGE_CODES:
           source_language = "the source language"
 
@@ -144,10 +161,10 @@ def translate_text(text, target_language, source_language=None):
 
     Translated text (in {target_language}):
     """
-    
+
     response = model.generate_content(prompt)
     translated_text = response.text.strip()
-    
+
     # Additional verification step
     verification_prompt = f"""
     Verify the accuracy of the following translation from {source_language} to {target_language}:
@@ -165,19 +182,19 @@ def translate_text(text, target_language, source_language=None):
 
     Verification result:
     """
-    
+
     verification_response = model.generate_content(verification_prompt)
     verification_result = verification_response.text.strip()
-    
+
     if verification_result != "Translation is accurate.":
         # If issues were found, use the corrected version
         translated_text = verification_result.split("\n")[-1]  # Get the last line of the response
-    
+
     return translated_text
 
 def text_to_speech(text, lang):
     try:
-        
+
         prompt_improve = f"""
         Task: Improve the text for text to speech.
 
@@ -186,7 +203,7 @@ def text_to_speech(text, lang):
         2. Correct any grammar issues to make the text perfect for a text to speech application.
         3. If the text contains humor, wordplay, or cultural references make sure that these are also present when reading it out loud.
         4. Remove all Anführungszeichen und sonderzeichen wie ! " # $ % & / ( ) = ? ~ etc. die eine korrekte Text zu Sprache ausgabe behindern.
-    
+
         Text:
         "{text}"
 
@@ -194,13 +211,13 @@ def text_to_speech(text, lang):
         """
         response_improve = model.generate_content(prompt_improve)
         improved_text = response_improve.text.strip()
-        
+
         #Ersetzen von unerwünschten Sonderzeichen
-        
+
         characters_to_remove = ['"', "'", '!', '#', '$', '%', '&', '/', '(', ')', '=', '?', '~', '<', '>', ',', '.']
         for char in characters_to_remove:
             improved_text = improved_text.replace(char, '')
-            
+
         tts = gTTS(text=improved_text, lang=lang)
         temp_file = "temp.mp3"
         tts.save(temp_file)
@@ -209,16 +226,16 @@ def text_to_speech(text, lang):
         logger.error(f"Error generating TTS: {e}")
         return None
 
-def tts_command(update: Update, context: CallbackContext) -> None:
+async def tts_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     if not is_vip(user.id) and user.id not in ADMIN_USER_IDS:
-        update.message.reply_text("🚫 This feature is only available for VIP users and admins.")
+        await update.message.reply_text("🚫 This feature is only available for VIP users and admins.")
         return
-    
+
     if not context.args:
-        update.message.reply_text("⚠️ Please provide text for text-to-speech.")
+        await update.message.reply_text("⚠️ Please provide text for text-to-speech.")
         return
-    
+
     text = " ".join(context.args)
     target_language = get_user_language(user.id)
     translated_text = translate_text(text, target_language)
@@ -226,15 +243,15 @@ def tts_command(update: Update, context: CallbackContext) -> None:
     if audio_file:
         try:
             with open(audio_file, 'rb') as f:
-               update.message.reply_audio(audio=InputFile(f), title="Text to Speech")
+               await update.message.reply_audio(audio=InputFile(f), title="Text to Speech")
             os.remove(audio_file)
         except Exception as e:
-            update.message.reply_text(f"An error occurred while sending audio: {e}")
+            await update.message.reply_text(f"An error occurred while sending audio: {e}")
     else:
-        update.message.reply_text("An error occurred while generating audio.")
+        await update.message.reply_text("An error occurred while generating audio.")
 
 
-def start(update: Update, context: CallbackContext) -> None:
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     ensure_user_in_settings(user.id)
     language = get_user_language(user.id)
@@ -249,9 +266,9 @@ def start(update: Update, context: CallbackContext) -> None:
     )
     welcome_message = welcome_message.replace("use", "use /setlanguage")
     welcome_message += "\n\nNeed help? Just type /help for more information."
-    update.message.reply_text(welcome_message)
+    await update.message.reply_text(welcome_message)
 
-def help_command(update: Update, context: CallbackContext) -> None:
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     ensure_user_in_settings(user_id)
     language = get_user_language(user_id)
@@ -267,9 +284,9 @@ def help_command(update: Update, context: CallbackContext) -> None:
         "To translate, simply forward a message to me. Enjoy translating! 🎉",
         language
     )
-    update.message.reply_text(help_message)
+    await update.message.reply_text(help_message)
 
-def language_codes(update: Update, context: CallbackContext) -> None:
+async def language_codes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     ensure_user_in_settings(user_id)
     language = get_user_language(user_id)
@@ -278,18 +295,33 @@ def language_codes(update: Update, context: CallbackContext) -> None:
         codes_message += f"{code}: {lang_name}\n"
     codes_message += "\nUse the /setlanguage command to set your preferred language."
     translated_message = translate_text(codes_message, language)
-    update.message.reply_text(translated_message)
+    await update.message.reply_text(translated_message)
 
-def translate_forwarded(update: Update, context: CallbackContext) -> None:
+async def translate_forwarded(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     ensure_user_in_settings(user.id)
     message = update.message
     if message.voice:
-        return # If voice message, do not translate
-        
+        return  # If voice message, do not translate
+
     text = message.text or message.caption or ""
     target_language = get_user_language(user.id)
-    source_language = message.from_user.language_code if message.from_user else None
+
+    # Determine source language and original sender based on forward_origin type
+    if message.forward_origin.type == "user":
+        source_language = message.forward_origin.sender_user.language_code if message.forward_origin.sender_user else None
+        original_sender = f"@{message.forward_origin.sender_user.username}" if message.forward_origin.sender_user.username else message.forward_origin.sender_user.first_name
+    elif message.forward_origin.type == "chat":
+        source_language = None  # Language code not available for chat forwards
+        original_sender = message.forward_origin.chat.title or "Channel"
+    elif message.forward_origin.type == "hidden_user":
+        source_language = None # Language code not directly available
+        original_sender = message.forward_origin.sender_user_name
+    else:
+        source_language = None
+        original_sender = "Unknown"
+
+
     translated_text = translate_text(text, target_language, source_language)
     if str(user.id) in user_info:
         if "translation_history" not in user_info[str(user.id)]:
@@ -298,38 +330,30 @@ def translate_forwarded(update: Update, context: CallbackContext) -> None:
         if len(user_info[str(user.id)]["translation_history"]) > 10:
             user_info[str(user.id)]["translation_history"].pop(0)
         save_json(USER_INFO_FILE, user_info)
-    
-    if message.forward_from:
-        original_sender = f"@{message.forward_from.username}" if message.forward_from.username else message.forward_from.first_name
-    elif message.forward_sender_name:
-        original_sender = message.forward_sender_name
-    elif message.forward_from_chat:
-        original_sender = message.forward_from_chat.title or "Channel"
-    else:
-        original_sender = "Unknown"
-    
+
+
     response = f"Original sender: {original_sender}\n\n🔤 Translation:\n\n{translated_text}"
-    update.message.reply_text(response)
+    await update.message.reply_text(response)
     update_usage_stats()
     update_user_info(user)
 
-def set_language(update: Update, context: CallbackContext) -> None:
+async def set_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     ensure_user_in_settings(user.id)
-    
+
     keyboard = []
     for code, name in VALID_LANGUAGE_CODES.items():
         keyboard.append([InlineKeyboardButton(name, callback_data=f'setlang_{code}')])
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    update.message.reply_text("🌐 Please choose your language:", reply_markup=reply_markup)
 
-def admin_panel(update: Update, context: CallbackContext) -> None:
+    await update.message.reply_text("🌐 Please choose your language:", reply_markup=reply_markup)
+
+async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     if user_id not in ADMIN_USER_IDS:
-        update.message.reply_text("🚫 You are not authorized to access the admin panel.")
+        await update.message.reply_text("🚫 You are not authorized to access the admin panel.")
         return
-    
+
     keyboard = [
         [InlineKeyboardButton("👥 User Count", callback_data='user_count')],
         [InlineKeyboardButton("📊 Language Statistics", callback_data='language_stats')],
@@ -345,68 +369,68 @@ def admin_panel(update: Update, context: CallbackContext) -> None:
         [InlineKeyboardButton("📋 List User Translations", callback_data='list_user_translations')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    update.message.reply_text("👨‍💼 Admin Panel:", reply_markup=reply_markup)
+    await update.message.reply_text("👨‍💼 Admin Panel:", reply_markup=reply_markup)
 
-def button_callback(update: Update, context: CallbackContext) -> None:
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    query.answer()
+    await query.answer()
 
     if query.data.startswith('setlang_'):
         language = query.data[8:]
         set_user_language(query.from_user.id, language)
         confirmation = translate_text(f"🌟 Language successfully set to: {VALID_LANGUAGE_CODES[language]}", language)
-        query.edit_message_text(confirmation)
+        await query.edit_message_text(confirmation)
         return
-    
+
     if query.data == 'user_count':
         count = len(user_settings)
-        query.edit_message_text(f"👥 Total users: {count}")
+        await query.edit_message_text(f"👥 Total users: {count}")
     elif query.data == 'language_stats':
         stats = {}
         for lang in user_settings.values():
             stats[lang] = stats.get(lang, 0) + 1
         text = "📊 Language statistics:\n" + "\n".join([f"{VALID_LANGUAGE_CODES.get(lang, lang)}: {count}" for lang, count in stats.items()])
-        query.edit_message_text(text)
+        await query.edit_message_text(text)
     elif query.data == 'reset_settings':
         user_settings.clear()
         save_json(USER_SETTINGS_FILE, user_settings)
-        query.edit_message_text("🔄 All user settings have been reset.")
+        await query.edit_message_text("🔄 All user settings have been reset.")
     elif query.data == 'usage_stats':
         total = usage_stats["total_translations"]
         daily = usage_stats["daily_stats"]
         text = f"📈 Total translations: {total}\n\nDaily statistics:\n"
         for date, count in daily.items():
             text += f"{date}: {count} translations\n"
-        query.edit_message_text(text)
+        await query.edit_message_text(text)
     elif query.data == 'search_user':
-        query.edit_message_text("🔍 Please enter the user ID you want to search for:")
+        await query.edit_message_text("🔍 Please enter the user ID you want to search for:")
         context.user_data['admin_state'] = 'waiting_for_user_id'
     elif query.data == 'broadcast':
-        query.edit_message_text("📣 Please enter the message you want to broadcast to all users:")
+        await query.edit_message_text("📣 Please enter the message you want to broadcast to all users:")
         context.user_data['admin_state'] = 'waiting_for_broadcast'
     elif query.data == 'user_info':
-        query.edit_message_text("👤 Please enter the user ID to get detailed information:")
+        await query.edit_message_text("👤 Please enter the user ID to get detailed information:")
         context.user_data['admin_state'] = 'waiting_for_user_info'
     elif query.data == 'change_user_lang':
-        query.edit_message_text("👤 Please enter the user ID to change the language for:")
+        await query.edit_message_text("👤 Please enter the user ID to change the language for:")
         context.user_data['admin_state'] = 'waiting_for_user_id_lang_change'
     elif query.data == 'add_vip_user':
-        query.edit_message_text("🌟 Please enter the user ID to add as a VIP user:")
+        await query.edit_message_text("🌟 Please enter the user ID to add as a VIP user:")
         context.user_data['admin_state'] = 'waiting_for_vip_user_id'
     elif query.data == 'remove_vip_user':
-        query.edit_message_text("🔽 Please enter the user ID to remove from VIP users:")
+        await query.edit_message_text("🔽 Please enter the user ID to remove from VIP users:")
         context.user_data['admin_state'] = 'waiting_for_remove_vip_user_id'
     elif query.data == 'list_users':
         users_list = "📋 List of all users:\n\n"
         for user_id, language in user_settings.items():
             vip_status = "🌟 VIP" if user_id in vip_users else "Regular"
             users_list += f"User ID: {user_id}, Language: {language}, Status: {vip_status}\n"
-        query.edit_message_text(users_list[:4096])  # Telegram message limit is 4096 characters
+        await query.edit_message_text(users_list[:4096])  # Telegram message limit is 4096 characters
     elif query.data == 'list_user_translations':
-        query.edit_message_text("👤 Please enter the user ID to get the translation history:")
+        await query.edit_message_text("👤 Please enter the user ID to get the translation history:")
         context.user_data['admin_state'] = 'waiting_for_user_translations'
 
-def handle_admin_input(update: Update, context: CallbackContext) -> None:
+async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     if user_id not in ADMIN_USER_IDS:
         return
@@ -416,20 +440,20 @@ def handle_admin_input(update: Update, context: CallbackContext) -> None:
         search_user_id = update.message.text
         if search_user_id in user_settings:
             lang = user_settings[search_user_id]
-            update.message.reply_text(f"User {search_user_id} has language set to: {VALID_LANGUAGE_CODES.get(lang, lang)}")
+            await update.message.reply_text(f"User {search_user_id} has language set to: {VALID_LANGUAGE_CODES.get(lang, lang)}")
         else:
-            update.message.reply_text("User not found in bot settings.")
+            await update.message.reply_text("User not found in bot settings.")
         del context.user_data['admin_state']
     elif state == 'waiting_for_broadcast':
         broadcast_message = update.message.text
         success_count = 0
         for user_id in user_settings.keys():
             try:
-                context.bot.send_message(chat_id=int(user_id), text=broadcast_message)
+                await context.bot.send_message(chat_id=int(user_id), text=broadcast_message)
                 success_count += 1
             except Exception as e:
                 logger.error(f"Failed to send broadcast to {user_id}: {e}")
-        update.message.reply_text(f"Broadcast sent successfully to {success_count} out of {len(user_settings)} users.")
+        await update.message.reply_text(f"Broadcast sent successfully to {success_count} out of {len(user_settings)} users.")
         del context.user_data['admin_state']
     elif state == 'waiting_for_user_info':
         user_id = update.message.text
@@ -446,11 +470,11 @@ def handle_admin_input(update: Update, context: CallbackContext) -> None:
                 message += f"Translation Count: {user['translation_count']}\n"
                 message += f"Preferred Language: {VALID_LANGUAGE_CODES.get(language, language)}\n"
                 message += f"VIP Status: {'Yes' if str(user_id) in vip_users else 'No'}"
-                update.message.reply_text(message)
+                await update.message.reply_text(message)
             else:
-                update.message.reply_text("User not found in bot settings.")
+                await update.message.reply_text("User not found in bot settings.")
         except Exception as e:
-            update.message.reply_text(f"Error retrieving user information: {str(e)}")
+            await update.message.reply_text(f"Error retrieving user information: {str(e)}")
         del context.user_data['admin_state']
     elif state == 'waiting_for_user_id_lang_change':
        user_id = update.message.text
@@ -459,33 +483,33 @@ def handle_admin_input(update: Update, context: CallbackContext) -> None:
            for code, name in VALID_LANGUAGE_CODES.items():
                 keyboard.append([InlineKeyboardButton(name, callback_data=f'setlang_{code}')])
            reply_markup = InlineKeyboardMarkup(keyboard)
-           update.message.reply_text("🌐 Please choose the new language:", reply_markup=reply_markup)
+           await update.message.reply_text("🌐 Please choose the new language:", reply_markup=reply_markup)
            context.user_data['admin_state'] = 'waiting_for_lang_change'
            context.user_data['lang_change_user_id'] = user_id
        else:
-           update.message.reply_text("User not found in bot settings.")
+           await update.message.reply_text("User not found in bot settings.")
            del context.user_data['admin_state']
     elif state == 'waiting_for_lang_change':
         if update.message.text.startswith('setlang_'):
            language = update.message.text[8:]
            set_user_language(context.user_data['lang_change_user_id'], language)
-           update.message.reply_text(f"Language of user with the ID {context.user_data['lang_change_user_id']} has been set to: {VALID_LANGUAGE_CODES[language]}.")
+           await update.message.reply_text(f"Language of user with the ID {context.user_data['lang_change_user_id']} has been set to: {VALID_LANGUAGE_CODES[language]}.")
         del context.user_data['admin_state']
         del context.user_data['lang_change_user_id']
     elif state == 'waiting_for_vip_user_id':
         vip_user_id = str(update.message.text)
         vip_users.add(vip_user_id)
         save_json(VIP_USERS_FILE, list(vip_users))
-        update.message.reply_text(f"User {vip_user_id} has been added to VIP users.")
+        await update.message.reply_text(f"User {vip_user_id} has been added to VIP users.")
         del context.user_data['admin_state']
     elif state == 'waiting_for_remove_vip_user_id':
         vip_user_id = str(update.message.text)
         if vip_user_id in vip_users:
             vip_users.remove(vip_user_id)
             save_json(VIP_USERS_FILE, list(vip_users))
-            update.message.reply_text(f"User {vip_user_id} has been removed from VIP users.")
+            await update.message.reply_text(f"User {vip_user_id} has been removed from VIP users.")
         else:
-            update.message.reply_text(f"User {vip_user_id} is not a VIP user.")
+            await update.message.reply_text(f"User {vip_user_id} is not a VIP user.")
         del context.user_data['admin_state']
     elif state == 'waiting_for_user_translations':
         user_id = update.message.text
@@ -496,66 +520,75 @@ def handle_admin_input(update: Update, context: CallbackContext) -> None:
                 for i, translation in enumerate(translation_history):
                     history_text += f"{i+1}. Original: {translation['original_text']}\n   Translation: {translation['translated_text']}\n"
                     if len(history_text) > 4000:
-                        update.message.reply_text(history_text)
+                        await update.message.reply_text(history_text)
                         history_text = ""
                 if len(history_text) > 0:
-                   update.message.reply_text(history_text)
+                   await update.message.reply_text(history_text)
             else:
-               update.message.reply_text(f"No translation history found for user ID {user_id}.")
+               await update.message.reply_text(f"No translation history found for user ID {user_id}.")
         else:
-            update.message.reply_text(f"User with ID {user_id} not found")
+            await update.message.reply_text(f"User with ID {user_id} not found")
         del context.user_data['admin_state']
 
-def chat(update: Update, context: CallbackContext) -> None:
+async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = update.effective_user.id
     if user_id not in ADMIN_USER_IDS and not is_vip(user_id):
-        update.message.reply_text("🚫 This feature is only available for VIP users and admins.")
+        await update.message.reply_text("🚫 This feature is only available for VIP users and admins.")
         return ConversationHandler.END
-    
-    update.message.reply_text("You can now start chatting with the AI. Send /endchat to end the conversation.")
-    return 'chatting'
 
-def handle_chat_message(update: Update, context: CallbackContext) -> None:
+    await update.message.reply_text("You can now start chatting with the AI. Send /endchat to end the conversation.")
+    return 1
+
+async def handle_chat_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_message = update.message.text
     if user_message.lower() == '/endchat':
-        update.message.reply_text("Chat session ended. Thank you for using our service!")
+        await update.message.reply_text("Chat session ended. Thank you for using our service!")
         return ConversationHandler.END
-    
+
     try:
         response = model.generate_content(user_message)
-        update.message.reply_text(response.text)
+        await update.message.reply_text(response.text)
     except Exception as e:
-        update.message.reply_text(f"An error occurred: {str(e)}")
-    return 'chatting'
+        await update.message.reply_text(f"An error occurred: {str(e)}")
+    return 1 # Keep same state
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Cancels and ends the conversation."""
+    user = update.message.from_user
+    logger.info("User %s canceled the conversation.", user.first_name)
+    await update.message.reply_text(
+        "Bye! I hope we can talk again some day."
+    )
+    return ConversationHandler.END
 
 def main() -> None:
-    updater = Updater(TELEGRAM_BOT_TOKEN)
-    dp = updater.dispatcher
+    # Use ApplicationBuilder for a more modern approach
+    app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(CommandHandler("help", help_command))
-    dp.add_handler(CommandHandler("languagecodes", language_codes))
-    dp.add_handler(CommandHandler("setlanguage", set_language))
-    dp.add_handler(CommandHandler("admin", admin_panel))
-    dp.add_handler(MessageHandler(Filters.forwarded, translate_forwarded))
-    
-    dp.add_handler(CommandHandler("tts", tts_command))
-    dp.add_handler(CallbackQueryHandler(button_callback))
+    # Add handlers using the application object
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("languagecodes", language_codes))
+    app.add_handler(CommandHandler("setlanguage", set_language))
+    app.add_handler(CommandHandler("admin", admin_panel))
+    app.add_handler(MessageHandler(filters.FORWARDED, translate_forwarded))
+    app.add_handler(CommandHandler("tts", tts_command))
+    app.add_handler(CallbackQueryHandler(button_callback))
 
     chat_handler = ConversationHandler(
         entry_points=[CommandHandler('chat', chat)],
         states={
-            'chatting': [MessageHandler(Filters.text & ~Filters.command, handle_chat_message)]
+            1: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_chat_message)], # Use integer state
         },
-        fallbacks=[CommandHandler('endchat', lambda u, c: ConversationHandler.END)]
+        fallbacks=[CommandHandler('endchat', cancel), CommandHandler("cancel", cancel)],
+        #allow_reentry = True # REMOVE THIS LINE
+
     )
-    dp.add_handler(chat_handler)
+    app.add_handler(chat_handler)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_input))
 
-    # Dieser Handler muss nach dem ConversationHandler hinzugefügt werden
-    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_admin_input))
-
-    updater.start_polling()
-    updater.idle()
+    # Use the application's run_polling method
+    app.run_polling()
 
 if __name__ == '__main__':
     main()
