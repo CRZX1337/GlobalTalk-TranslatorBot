@@ -37,6 +37,30 @@ GEMINI_API_KEY=your_gemini_api_key
 ADMIN_USER_IDS=id1,id2,id3
 ```
 
+## Manual Environment Configuration
+If the .env file is not working properly, you can set the environment variables manually using export commands:
+bash
+
+# Manual environment variable setup
+```bash
+export TELEGRAM_BOT_TOKEN="your_telegram_token"
+export GEMINI_API_KEY="your_gemini_api_key"
+export ADMIN_USER_IDS="id1,id2,id3"
+```
+
+For Windows users, use the following commands in Command Prompt:
+```bash
+set TELEGRAM_BOT_TOKEN=your_telegram_token
+set GEMINI_API_KEY=your_gemini_api_key
+set ADMIN_USER_IDS=id1,id2,id3
+```
+Or in PowerShell:
+```powershell
+$env:TELEGRAM_BOT_TOKEN="your_telegram_token"
+$env:GEMINI_API_KEY="your_gemini_api_key"
+$env:ADMIN_USER_IDS="id1,id2,id3"
+```
+
 ## Features 🚀
 
 - Modular architecture for enhanced maintainability
