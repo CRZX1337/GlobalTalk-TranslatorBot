@@ -16,7 +16,7 @@ from telegram.ext import (
 from dotenv import load_dotenv
 
 from utils import load_json, save_json
-from translation_service import translate_text, text_to_speech, TranslationError
+from translation_service import translate_text, text_to_speech, TranslationError, get_model # Import get_model
 from user_management import ensure_user_in_settings, get_user_language, set_user_language, update_user_info, is_vip
 from usage_stats import update_usage_stats
 from admin_commands import admin_panel, button_callback, handle_admin_input
@@ -45,6 +45,8 @@ user_info = load_json(USER_INFO_FILE)
 vip_users = set(load_json(VIP_USERS_FILE, []))
 
 api_checker = API_Checker(GEMINI_API_KEY)
+# Initialize the model here, after translation_service is imported
+model = get_model()
 api_checker.start()  # Startet den API-Checker-Thread
 tts_command=None
 
@@ -77,57 +79,38 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     ensure_user_in_settings(user.id)
     language = get_user_language(user.id)
     update_user_info(user)
+    welcome_message_en = "🌟 Welcome to GlobalTalk-TranslatorBot! 🌍✨\n\n" \
+                           "I'm here to help you translate forwarded messages into various languages. " \
+                           "Simply forward me a message, and I'll translate it to your preferred language.\n\n" \
+                           "To get started, use /setlanguage to choose your language, or just start forwarding messages!\n\n" \
+                           "Need help? Just type /help for more information."
 
-    try:
-        welcome_message = translate_text(
-            "🌟 Welcome to GlobalTalk-TranslatorBot! 🌍✨\n\n"
-            "I'm here to help you translate forwarded messages into various languages. "
-            "Simply forward me a message, and I'll translate it to your preferred language.\n\n"
-            "To get started, use  to choose your language, or just start forwarding messages!\n\n"
-            "Need help?",
-            language
-        )
-        welcome_message = welcome_message.replace("use", "use /setlanguage")
-        welcome_message += "\n\nNeed help? Just type /help for more information."
-        await update.message.reply_text(welcome_message)
-    except TranslationError as e:
-        logger.error(f"Translation error in start command: {e}")
-        await update.message.reply_text(f"Error: Could not translate welcome message. Using default language.  Please try again later.")
-    except Exception as e:
-        logger.exception(f"Unexpected error in start command: {e}")
-        await update.message.reply_text("An unexpected error occurred. Please try again later.")
+    await update.message.reply_text(welcome_message_en)
+
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user # Hinzugefügt
     user_id = user.id # Hier den richtigen user definieren
     ensure_user_in_settings(user_id)
-    language = get_user_language(user_id)
-    try:
-        help_message = translate_text(
-            "🤖 Bot Commands:\n\n"
-            "🌟 /start - Start the bot and see the welcome message\n"
-            "🔤 /setlanguage - Set your preferred language\n"
-            "ℹ️ /help - Show this help message\n"
-            "🌍 /languagecodes - View available language codes\n"
-            "👨‍💼 /admin - Access admin panel (only for authorized users)\n"
-            "🎧 /tts [text] - Convert text to speech (VIP only)\n"
-            "💬 /chat - Start a chat session (for VIP users and admins)\n\n"
-            "To translate, simply forward a message to me. Enjoy translating! 🎉",
-            language
-        )
-        await update.message.reply_text(help_message)
-    except TranslationError as e:
-        logger.error(f"Translation error in help command: {e}")
-        await update.message.reply_text("Error: Could not translate help message.  Please try again later.")
-    except Exception as e:
-        logger.exception(f"Unexpected error in help command: {e}")
-        await update.message.reply_text("An unexpected error occurred. Please try again later.")
+    language = get_user_language(user.id)
+    help_message_en = "🤖 Bot Commands:\n\n" \
+                      "🌟 /start - Start the bot and see the welcome message\n" \
+                      "🔤 /setlanguage - Set your preferred language\n" \
+                      "ℹ️ /help - Show this help message\n" \
+                      "🌍 /languagecodes - View available language codes\n" \
+                      "👨‍💼 /admin - Access admin panel (only for authorized users)\n" \
+                      "🎧 /tts [text] - Convert text to speech (VIP only)\n" \
+                      "💬 /chat - Start a chat session (for VIP users and admins)\n\n" \
+                      "To translate, simply forward a message to me. Enjoy translating! 🎉"
+
+    await update.message.reply_text(help_message_en)
+
 
 async def language_codes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     user_id = user.id # Hier den richtigen user definieren
     ensure_user_in_settings(user_id)
-    language = get_user_language(user_id)
+    language = get_user_language(user.id)
     codes_message = "🌐 Available Language Codes:\n\n"
     for code, lang_name in VALID_LANGUAGE_CODES.items():
         codes_message += f"{code}: {lang_name}\n"
@@ -226,14 +209,20 @@ def main() -> None:
     app.add_handler(CommandHandler("tts", tts_command))
     app.add_handler(CallbackQueryHandler(button_callback))
 
+    # Define the wrapper function BEFORE it is used in the ConversationHandler
+    async def handle_chat_message_wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE): # Wrapper function
+        return await handle_chat_message(update, context, model) # Pass model here
+
+
     chat_handler = ConversationHandler(
         entry_points=[CommandHandler('chat', chat)],
         states={
-            1: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_chat_message)], # Use integer state
+            1: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_chat_message_wrapper)], # Use integer state, use wrapper
         },
         fallbacks=[CommandHandler('endchat', cancel), CommandHandler("cancel", cancel)],
-
     )
+
+
     app.add_handler(chat_handler)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_input))
 
