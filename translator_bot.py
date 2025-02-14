@@ -53,7 +53,7 @@ tts_command=None
 async def tts_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     if not is_vip(user.id) and user.id not in ADMIN_USER_IDS:
-        await update.message.reply_text("🚫 This feature is only available for VIP users and admins.")
+        await update.message.reply_text("🚫 This feature is only available for VIP users and admins!!")
         return
 
     if not context.args:
