@@ -90,5 +90,4 @@ For support or inquiries:
 
 Developed with ❤️ by CryZuX
 
-Quellen:
-[1] 503.jpg https://pplx-res.cloudinary.com/image/upload/v1739092059/user_uploads/SSjTLPsRrblhVAM/503.jpg
+
